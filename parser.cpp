@@ -100,17 +100,18 @@ namespace h264_frames {
 	int read_file(const char* filepath, std::vector<uint8_t>& filebuffer) {
 		FILE* videofile = fopen(filepath, "rb");
 		const int buffsize = 65535;
-        filebuffer.clear();
-        filebuffer.resize(buffsize);
+        	filebuffer.clear();
+        	filebuffer.resize(buffsize);
 		int size = 0, totalread = 0;
 		while ((size = fread(filebuffer.data() + totalread, 1, buffsize, videofile)) > 0) {
 			totalread += size;
-            if ((filebuffer.size() - totalread) < buffsize) {
+            		if ((filebuffer.size() - totalread) < buffsize) {
 			    filebuffer.resize(filebuffer.size() + buffsize);
-            }
+			}
 		}
-        filebuffer.resize(totalread);
-        return filebuffer.size();
+        	filebuffer.resize(totalread);
+		fclose(videofile)
+        	return filebuffer.size();
 	}
 
 }
