@@ -1,4 +1,4 @@
-
+enum class UNIT_TYPE { NDR = 1, IDR = 5, SEI, SPS, PPS, AUD, EOS };
 namespace h264_frames {
 	namespace keyframe {
 		namespace four_bytes {
