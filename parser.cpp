@@ -1,87 +1,94 @@
 enum class UNIT_TYPE { NDR = 1, IDR = 5, SEI, SPS, PPS, AUD, EOS };
-namespace h264_frames {
-	namespace keyframe {
-		namespace four_bytes {
-			const uint8_t startcode[] = { 00, 00, 00, 01 };
-		}
-		namespace three_bytes {
-			const uint8_t startcode[] = { 00, 00, 01 };
+
+namespace h264_frame {
+	namespace keyframe { 
+		namespace startcode { 
+			const char four_bytes[] = { 00, 00, 00, 01 }; 
+			const char three_bytes[] = { 00, 00, 01 };
 		}
 	}
-	bool IsNalUnit(uint8_t* data) {
-		if ((memcmp(data, keyframe::four_bytes::startcode, sizeof(keyframe::four_bytes::startcode)) == 0)
-			|| (memcmp(data, keyframe::three_bytes::startcode, sizeof(keyframe::three_bytes::startcode)) == 0)) {
+	
+	inline bool is_nal(char* data) {
+		if ((memcmp(data, keyframe::startcode::four_bytes, sizeof(keyframe::startcode::four_bytes)) == 0)
+			|| (memcmp(data, keyframe::startcode::three_bytes, sizeof(keyframe::startcode::three_bytes)) == 0)) {
 			return true;
 		}
 		return false;
 	}
-
-    /*
-    * @param uint8_t* data_cursor                      : video data buffer pointer
-    * @param const int data_size                       : video data size
-    * @param std::vector<std::vector<uint8_t>>& frames : out buffer
-    */
-	void split_frames(uint8_t* data_cursor, const int data_size, std::vector<std::vector<uint8_t>>& frames) {
+	/*
+	* @param char* data_cursor                      : video data buffer pointer
+	* @param const int data_size                       : video data size
+	* @param std::vector<std::vector<uint8_t>>& frames : out buffer
+	*/
+	void split_frames(char* data_cursor, const int data_size, std::vector<std::vector<char>>& frames) {
 		long long read_idx = 0;
-		auto PushFrame = [&](uint8_t*& data, const int datasize, std::vector<std::vector<uint8_t>>& frames) {
-			std::vector<uint8_t> frame_buff(datasize);
+		auto push_frame = [](char* data, const int datasize, std::vector<std::vector<char>>& frames) {
+			std::vector<char> frame_buff(datasize);
 			memcpy(frame_buff.data(), data, datasize);
 			frames.push_back(frame_buff);
-			data += datasize;
-			read_idx += datasize;
 		};
-		while (read_idx < data_size)
-		{
+
+		while (read_idx < data_size) {
 			int startcode_len = 0;
-			if ((memcmp(data_cursor, keyframe::four_bytes::startcode, sizeof(keyframe::four_bytes::startcode)) == 0)) {
-				startcode_len = sizeof(keyframe::four_bytes::startcode);
-			}
-			else if ((memcmp(data_cursor, keyframe::three_bytes::startcode, sizeof(keyframe::three_bytes::startcode)) == 0)) {
-				startcode_len = sizeof(keyframe::three_bytes::startcode);
+			if (read_idx <= data_size - 4) {
+				if ((data_cursor[read_idx] == 0x00) && (data_cursor[read_idx + 1] == 0x00)) {
+					if (data_cursor[read_idx + 2] == 0x01) { // keyframe::startcode::three_bytes
+						startcode_len = sizeof(keyframe::startcode::three_bytes);
+					}
+					else if ((data_cursor[read_idx + 2] == 0x00) && (data_cursor[read_idx + 3] == 0x01)) { // keyframe::startcode::four_bytes
+						startcode_len = sizeof(keyframe::startcode::four_bytes);
+					}
+				}
 			}
 			else {
 				read_idx++;
 				continue;
 			}
+
+
 			if (startcode_len > 0)
 			{
-				uint32_t  unit = *(data_cursor + startcode_len);
+				uint32_t  unit = *(data_cursor + read_idx + startcode_len);
 				UNIT_TYPE unit_type = (UNIT_TYPE)((unit) & 0x1f); // 0001 1111
 				std::vector<uint8_t> frame_buff;
 				int sps_size = 3, pps_size = 3, idr_size = 3;
 				switch (unit_type)
 				{
 				case UNIT_TYPE::SPS:
-					while (!IsNalUnit(data_cursor + sps_size)) { // pps까지
+					while (!is_nal(data_cursor + read_idx + sps_size)) { // pps까지
 						sps_size++;
 						if (sps_size >= data_size) {
 							break;
 						}
 					}
-					PushFrame(data_cursor, sps_size, frames);
+					push_frame(data_cursor + read_idx, sps_size, frames);
+					read_idx += sps_size;
 					continue;
-				case UNIT_TYPE::PPS: 
-					while (!IsNalUnit(data_cursor + pps_size)) { // 다음 start code 까지
+				case UNIT_TYPE::PPS:
+					while (!is_nal(data_cursor + read_idx + pps_size)) { // 다음 start code 까지
 						pps_size++;
 						if ((read_idx + pps_size) >= data_size) {
 							break;
 						}
 					}
-					PushFrame(data_cursor, pps_size, frames);
+					push_frame(data_cursor + read_idx, pps_size, frames);
+					read_idx += pps_size;
 					continue;
 					break;
 				case UNIT_TYPE::NDR:
 				case UNIT_TYPE::IDR:
-					while (!IsNalUnit(data_cursor + idr_size)) { // 다음 start code 까지
+					while (!is_nal(data_cursor + read_idx + idr_size)) { // 다음 start code 까지
 						idr_size++;
 						if ((read_idx + idr_size) >= data_size) {
 							break;
 						}
 					}
-					PushFrame(data_cursor, idr_size, frames);
+					push_frame(data_cursor + read_idx, idr_size, frames);
+					read_idx += idr_size;
 					break;
 				case UNIT_TYPE::EOS:
-					PushFrame(data_cursor, data_size - read_idx, frames);
+					push_frame(data_cursor + read_idx, data_size - read_idx, frames);
+					read_idx += data_size - read_idx;
 					break;
 				case UNIT_TYPE::SEI:
 				case UNIT_TYPE::AUD:
@@ -92,26 +99,15 @@ namespace h264_frames {
 			}
 		}
 	}
+}
 
-    /*
-    * @param const char* filepath             : h264file full path
-    * @param std::vector<uint8_t>& filebuffer : out buffer
-    */
-	int read_file(const char* filepath, std::vector<uint8_t>& filebuffer) {
-		FILE* videofile = fopen(filepath, "rb");
-		const int buffsize = 65535;
-        	filebuffer.clear();
-        	filebuffer.resize(buffsize);
-		int size = 0, totalread = 0;
-		while ((size = fread(filebuffer.data() + totalread, 1, buffsize, videofile)) > 0) {
-			totalread += size;
-            		if ((filebuffer.size() - totalread) < buffsize) {
-			    filebuffer.resize(filebuffer.size() + buffsize);
-			}
-		}
-        	filebuffer.resize(totalread);
-		fclose(videofile)
-        	return filebuffer.size();
-	}
-
+int read_file(const char* filepath, std::vector<char>& filebuffer) {
+	ifstream vfile(filepath.c_str(), ios::binary);
+	vfile.seekg(0, ios::end);
+	int file_size = vfile.tellg();
+	vfile.seekg(0, vfile.beg);
+	
+	filebuffer.resize(file_size);
+	vfile.read(filebuffer.data(), file_size);
+	return file_size;
 }
